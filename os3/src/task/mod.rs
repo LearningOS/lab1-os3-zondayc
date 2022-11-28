@@ -17,9 +17,11 @@ mod task;
 use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_WRITE, SYSCALL_TASK_INFO, SYSCALL_YIELD};
+use crate::timer::{get_time, get_time_ms};
 use lazy_static::*;
 pub use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{TaskControlBlock, TaskStatus, CurTaskInfo};
 
 pub use context::TaskContext;
 
@@ -54,6 +56,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_info: CurTaskInfo::zero_init(),
         }; MAX_APP_NUM];
         for (i, t) in tasks.iter_mut().enumerate().take(num_app) {
             t.task_cx = TaskContext::goto_restore(init_app_cx(i));// 保存传入的 sp，并将 ra 设置为 __restore 的入口地址
@@ -80,6 +83,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.task_info.begin_time=get_time_ms();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -122,6 +126,11 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            inner.tasks[next].task_info.begin_time=match inner.tasks[next].task_info.begin_time {
+                a if a>0=>a,
+                _=>get_time_ms(),
+            };
+            info!("time is {}",inner.tasks[next].task_info.begin_time);
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -136,8 +145,25 @@ impl TaskManager {
         }
     }
 
+    fn get_current_process(&self)->TaskControlBlock{
+        let inner=self.inner.exclusive_access();
+        let current=inner.current_task;
+        inner.tasks[current].clone()
+    }
+
+    fn update_info(&self, syscall_id:usize){
+        let mut inner=self.inner.exclusive_access();
+        let current=inner.current_task;
+        match syscall_id {
+            SYSCALL_EXIT=>inner.tasks[current].task_info.sys_exit+=1,
+            SYSCALL_GET_TIME=>inner.tasks[current].task_info.sys_time+=1,
+            SYSCALL_WRITE=>inner.tasks[current].task_info.sys_write+=1,
+            SYSCALL_TASK_INFO=>inner.tasks[current].task_info.sys_info+=1,
+            SYSCALL_YIELD=>inner.tasks[current].task_info.sys_yield+=1,
+            _=>panic!("error syscall!"),
+        }
+    }
     // LAB1: Try to implement your function to update or get task info!
-    //TODO:update task info 
 }
 
 /// Run the first task in task list.
@@ -171,6 +197,14 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+pub fn update_task_info(syscall_id:usize){
+    TASK_MANAGER.update_info(syscall_id);
+}
+
+pub fn get_current_tcb()->TaskControlBlock{
+    TASK_MANAGER.get_current_process()
 }
 
 // LAB1: Public functions implemented here provide interfaces.
