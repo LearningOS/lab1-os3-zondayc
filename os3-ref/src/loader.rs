@@ -66,7 +66,7 @@ pub fn get_num_app() -> usize {
 
 /// Load nth user app at
 /// [APP_BASE_ADDRESS + n * APP_SIZE_LIMIT, APP_BASE_ADDRESS + (n+1) * APP_SIZE_LIMIT).
-pub fn load_apps() {
+pub fn load_apps() {//将所有用户程序在内核初始化时一并加入内存
     extern "C" {
         fn _num_app();
     }
@@ -93,7 +93,7 @@ pub fn load_apps() {
 }
 
 /// get app info with entry and sp and save `TrapContext` in kernel stack
-pub fn init_app_cx(app_id: usize) -> usize {
+pub fn init_app_cx(app_id: usize) -> usize {//在内核栈中压入了一个Trap上下文，返回的是压入上下文后sp的值
     KERNEL_STACK[app_id].push_context(TrapContext::app_init_context(
         get_base_i(app_id),
         USER_STACK[app_id].get_sp(),

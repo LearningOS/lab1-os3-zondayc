@@ -16,7 +16,7 @@ mod lang_items;
 mod loader;
 mod logging;
 mod sbi;
-mod sync;
+mod sync; 
 mod syscall;
 mod task;
 mod timer;
